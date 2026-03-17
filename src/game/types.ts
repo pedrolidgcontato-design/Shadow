@@ -1,5 +1,5 @@
 export type ClassType = 'warrior' | 'mage' | 'archer' | 'assassin' | 'necromancer';
-export type GameState = 'MENU' | 'CLASS' | 'PLAY' | 'INV' | 'LEVELUP' | 'GAMEOVER' | 'WIN' | 'DIALOG';
+export type GameState = 'MENU' | 'CLASS' | 'PLAY' | 'INV' | 'LEVELUP' | 'GAMEOVER' | 'WIN' | 'DIALOG' | 'TRANSITION';
 export type MobTier = 'low' | 'med' | 'high' | 'boss' | 'hunter';
 
 export interface Item {
