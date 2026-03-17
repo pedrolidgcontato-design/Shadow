@@ -29,6 +29,7 @@ export class Player {
   hp: number; maxHp: number; mp: number; maxMp: number;
   atk: number; def: number; speed: number;
   hpTotal: number; mpTotal: number; atkTotal: number; defTotal: number; baseSpeed: number;
+  critChance: number = 0; lifeSteal: number = 0; elementalDamage: { type: 'fire' | 'ice' | 'lightning' | 'poison', amount: number } | null = null;
   level: number = 1; xp: number = 0; xpNext: number = 100;
   gold: number = 0; pts: number = 0;
   classType: ClassType;
@@ -39,6 +40,7 @@ export class Player {
   maxShadows: number = 3;
   atkCd: number = 0;
   skillCd: number = 0;
+  maxSkillCd: number = 1;
   facingLeft: boolean = false;
   passives: Set<string> = new Set();
   
@@ -50,6 +52,7 @@ export class Player {
   hitTimer: number = 0;
   stamina: number = 100;
   maxStamina: number = 100;
+  staminaExhausted: boolean = false;
 
   constructor(x: number, y: number, classType: ClassType) {
     this.x = x; this.y = y; this.classType = classType;
@@ -65,6 +68,7 @@ export class Player {
   recalc() {
     this.hpTotal = this.maxHp; this.mpTotal = this.maxMp;
     this.atkTotal = this.atk; this.defTotal = this.def;
+    this.critChance = 0; this.lifeSteal = 0; this.elementalDamage = null;
     this.passives.clear();
     for (const item of this.inventory) {
       if (item.equipped) {
@@ -72,6 +76,9 @@ export class Player {
         if (item.stats.maxMp) this.mpTotal += item.stats.maxMp;
         if (item.stats.atk) this.atkTotal += item.stats.atk;
         if (item.stats.def) this.defTotal += item.stats.def;
+        if (item.stats.critChance) this.critChance += item.stats.critChance;
+        if (item.stats.lifeSteal) this.lifeSteal += item.stats.lifeSteal;
+        if (item.stats.elementalDamage) this.elementalDamage = item.stats.elementalDamage;
         if (item.type === 'passive_skill' && item.skillId) this.passives.add(item.skillId);
       }
     }
@@ -108,10 +115,16 @@ export class Player {
     if (input.keys['d']) dx += 1;
     
     let currentSpeed = this.speed;
-    if (input.keys['shift'] && this.stamina > 0 && (dx !== 0 || dy !== 0)) {
+    if (this.stamina <= 0) {
+      this.staminaExhausted = true;
+    } else if (this.stamina >= this.maxStamina * 0.2) {
+      this.staminaExhausted = false;
+    }
+
+    if (input.keys['shift'] && !this.staminaExhausted && (dx !== 0 || dy !== 0)) {
       currentSpeed *= 1.8;
       this.stamina -= 1;
-      if (engine.ticks % 3 === 0) {
+      if (engine.ticks % 8 === 0) {
         engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 15, 0.5, '#ffffff'));
       }
     } else {
@@ -135,6 +148,9 @@ export class Player {
           'arc', Math.PI / 2, 10, 2, 'rgba(255, 255, 255, 0.5)'
         ));
       }
+    } else if (engine.floorModifier === 'poison' && engine.ticks % 60 === 0) {
+      this.hp -= this.hpTotal * 0.02;
+      engine.floatingTexts.push(new FloatingText(this.x, this.y, "-Poison", '#10b981'));
     }
 
     if (this.atkCd > 0) this.atkCd--;
@@ -151,7 +167,7 @@ export class Player {
         const sy = this.y + Math.sin(angle) * 40;
         for (const m of engine.monsters) {
           if (Math.hypot(m.x - sx, m.y - sy) < m.r + 10 && m.cd <= 0) {
-            m.takeDamage(this.atkTotal * 0.5);
+            m.takeDamage(this.atkTotal * 0.5, engine);
             engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${Math.floor(this.atkTotal * 0.5)}`, '#eab308'));
             m.cd = 20;
           }
@@ -162,7 +178,7 @@ export class Player {
       engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 100, 0, '#ef4444'));
       for (const m of engine.monsters) {
         if (Math.hypot(m.x - this.x, m.y - this.y) < 100 + m.r) {
-          m.takeDamage(this.atkTotal * 0.2);
+          m.takeDamage(this.atkTotal * 0.2, engine);
           engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${Math.floor(this.atkTotal * 0.2)}`, '#ef4444'));
         }
       }
@@ -188,7 +204,7 @@ export class Player {
             let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - angle);
             if (diff > Math.PI) diff = 2 * Math.PI - diff;
             if (diff < 1.2) {
-              const d = m.takeDamage(this.atkTotal);
+              const d = m.takeDamage(this.atkTotal, engine);
               if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
               engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
               engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 20, 1.0, '#ef4444'));
@@ -206,7 +222,7 @@ export class Player {
             if (diff > Math.PI) diff = 2 * Math.PI - diff;
             if (diff < 1.2) {
               const dmg = this.isInvisible ? this.atkTotal * 2 : this.atkTotal;
-              const d = m.takeDamage(dmg);
+              const d = m.takeDamage(dmg, engine);
               if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
               engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
               engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 20, 1.0, '#ef4444'));
@@ -255,7 +271,7 @@ export class Player {
               let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - this.channelAngle);
               if (diff > Math.PI) diff = 2 * Math.PI - diff;
               if (diff < 0.2) {
-                const d = m.takeDamage(this.atkTotal * 0.5);
+                const d = m.takeDamage(this.atkTotal * 0.5, engine);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#3b82f6'));
               }
             }
@@ -297,11 +313,11 @@ export class Player {
           engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 80, 0, '#94a3b8'));
           for (const m of engine.monsters) {
             if (Math.hypot(m.x - this.x, m.y - this.y) < 80 + m.r) {
-              const d = m.takeDamage(this.atkTotal * 2);
+              const d = m.takeDamage(this.atkTotal * 2, engine);
               engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
             }
           }
-          this.skillCd = 300; // 5s (60 ticks/s)
+          this.skillCd = 300; this.maxSkillCd = 300; // 5s (60 ticks/s)
         }
       } else if (this.classType === 'mage') {
         if (this.mp >= 30) {
@@ -309,7 +325,7 @@ export class Player {
           this.isChanneling = true;
           this.channelTimer = 120; // 2 seconds
           this.channelAngle = angle;
-          this.skillCd = 1200; // 20s
+          this.skillCd = 1200; this.maxSkillCd = 1200; // 20s
         }
       } else if (this.classType === 'archer') {
         if (this.mp >= 20) {
@@ -326,7 +342,7 @@ export class Player {
             const a = angle + i * 0.15;
             engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 18, this.atkTotal * 1.5, 'player', '#22c55e', 4, 'normal'));
           }
-          this.skillCd = 600; // 10s
+          this.skillCd = 600; this.maxSkillCd = 600; // 10s
         }
       } else if (this.classType === 'assassin') {
         if (this.mp >= 20) {
@@ -334,7 +350,7 @@ export class Player {
           this.isInvisible = true;
           this.invisibleTimer = 300; // 5s
           engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 30, 0, '#000000'));
-          this.skillCd = 600; // 10s
+          this.skillCd = 600; this.maxSkillCd = 600; // 10s
         }
       } else if (this.classType === 'necromancer') {
         if (this.mp >= 20) {
@@ -352,7 +368,7 @@ export class Player {
             engine.corpses.splice(targetCorpse, 1);
             this.shadows.push(new Shadow(c.x, c.y, this.level, this.hpTotal * 0.5, this.atkTotal * 0.8, this.defTotal * 0.5, this));
             engine.particles.push(new Particle(c.x, c.y, 'ring', 0, 40, 0, '#a855f7'));
-            this.skillCd = 600; // 10s
+            this.skillCd = 600; this.maxSkillCd = 600; // 10s
           }
         }
       }
@@ -378,7 +394,7 @@ export class Player {
               let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - angle);
               if (diff > Math.PI) diff = 2 * Math.PI - diff;
               if (diff < 1.5) {
-                const d = m.takeDamage(this.atkTotal * 2.5);
+                const d = m.takeDamage(this.atkTotal * 2.5, engine);
                 if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
                 engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 30, 1.0, '#ef4444'));
@@ -421,7 +437,7 @@ export class Player {
             }
             for (const m of engine.monsters) {
               if (Math.hypot(m.x - wx, m.y - wy) < 120 + m.r) {
-                const d = m.takeDamage(this.atkTotal * 3.0);
+                const d = m.takeDamage(this.atkTotal * 3.0, engine);
                 if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#3b82f6'));
               }
@@ -471,7 +487,7 @@ export class Player {
             engine.particles.push(new Particle(wx, wy, 'ring', 0, 100, 1, '#f97316'));
             for (const m of engine.monsters) {
               if (Math.hypot(m.x - wx, m.y - wy) < 150 + m.r) {
-                const d = m.takeDamage(this.atkTotal * 4);
+                const d = m.takeDamage(this.atkTotal * 4, engine);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
               }
             }
@@ -512,7 +528,10 @@ export class Player {
 
     if (this.facingLeft) ctx.scale(-1, 1);
     const sprite = getSprite(this.classType, 4);
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, -16, -16, 32, 32);
+    ctx.shadowBlur = 0;
     ctx.restore();
 
     // Draw weapon pointing at mouse
@@ -563,24 +582,44 @@ export class Monster {
   cd: number = 0; abilityCd: number = 0; sprite: string; tier: MobTier;
   isInvisible: boolean = false; invisibilityTimer: number = 0;
   hitTimer: number = 0;
+  elementalWeakness: 'fire' | 'ice' | 'lightning' | 'poison' | null = null;
+  elementalResistance: 'fire' | 'ice' | 'lightning' | 'poison' | null = null;
+  specialAbility: 'teleport' | 'shield' | 'summon' | null = null;
+  shieldHp: number = 0;
+  bossPhase: number = 1;
 
-  constructor(x: number, y: number, level: number, tier: MobTier, player: Player, theme: string) {
+  constructor(x: number, y: number, level: number, tier: MobTier, player: Player, theme: string, floorModifier: import('./types').FloorModifier = 'none', floor: number = 1) {
     this.x = x; this.y = y; this.level = level; this.tier = tier;
     
+    if (level >= 30 && Math.random() < 0.3) {
+      const abilities: ('teleport' | 'shield' | 'summon')[] = ['teleport', 'shield', 'summon'];
+      this.specialAbility = abilities[Math.floor(Math.random() * abilities.length)];
+    }
+
+    if (floorModifier === 'elemental') {
+      const elements: ('fire' | 'ice' | 'lightning' | 'poison')[] = ['fire', 'ice', 'lightning', 'poison'];
+      this.elementalWeakness = elements[Math.floor(Math.random() * elements.length)];
+      this.elementalResistance = elements[Math.floor(Math.random() * elements.length)];
+      if (this.elementalWeakness === this.elementalResistance) this.elementalResistance = null;
+    }
+
     if (tier === 'low') {
       this.maxHp = this.hp = 80 + level * 15; this.atk = 15 + level * 3;
     } else if (tier === 'med') {
       this.maxHp = this.hp = 120 + level * 20; this.atk = 40 + level * 4;
     } else if (tier === 'high') {
-      this.maxHp = this.hp = player.hpTotal * 2.5; this.atk = player.atkTotal * 2.5;
+      this.maxHp = this.hp = 200 + level * 30; this.atk = 60 + level * 6;
     } else if (tier === 'boss') {
-      this.maxHp = this.hp = player.hpTotal * 5; this.atk = player.atkTotal * 5;
+      this.maxHp = this.hp = 500 + level * 50; this.atk = 100 + level * 10;
     } else { // hunter
-      this.maxHp = this.hp = player.hpTotal * 3.5; this.atk = player.atkTotal * 3.5;
+      this.maxHp = this.hp = 400 + level * 40; this.atk = 80 + level * 8;
     }
 
     if (tier === 'boss') {
-      this.sprite = 'boss'; this.r = 40;
+      const bossSprites = ['slime_king', 'crystal_golem', 'vampire_lord', 'ice_dragon', 'lich', 'shadow_demon', 'mech_behemoth', 'seraphim', 'ancient_knight', 'tower_god'];
+      const bossIndex = Math.min(Math.floor((floor - 1) / 10), bossSprites.length - 1);
+      this.sprite = bossSprites[bossIndex];
+      this.r = 40;
     } else if (tier === 'hunter') {
       this.sprite = 'hunter'; this.r = 24;
     } else {
@@ -598,13 +637,46 @@ export class Monster {
 
     this.def = Math.floor(this.atk / 2);
     this.speed = 2.0 + level * 0.08;
+    
+    if (this.specialAbility === 'shield') {
+      this.shieldHp = this.maxHp * 0.5;
+    }
+
     this.xp = this.maxHp; this.gold = this.maxHp / 5;
   }
 
-  takeDamage(d: number) {
-    const real = Math.max(1, Math.floor(d - this.def / 2));
-    this.hp -= real;
+  takeDamage(d: number, engine?: GameEngine) {
+    let multiplier = 1;
+    let isCrit = false;
+    if (engine && engine.player) {
+      if (engine.player.critChance > 0 && Math.random() < engine.player.critChance / 100) {
+        multiplier *= 2;
+        isCrit = true;
+      }
+      if (engine.player.elementalDamage) {
+        if (this.elementalWeakness === engine.player.elementalDamage.type) multiplier *= 1.5;
+        if (this.elementalResistance === engine.player.elementalDamage.type) multiplier *= 0.5;
+        d += engine.player.elementalDamage.amount;
+      }
+    }
+    const real = Math.max(1, Math.floor((d * multiplier) - this.def / 2));
+    
+    if (this.shieldHp > 0) {
+      if (real > this.shieldHp) {
+        const remaining = real - this.shieldHp;
+        this.shieldHp = 0;
+        this.hp -= remaining;
+      } else {
+        this.shieldHp -= real;
+      }
+    } else {
+      this.hp -= real;
+    }
+    
     this.hitTimer = 10;
+    if (engine && isCrit) {
+      engine.floatingTexts.push(new FloatingText(this.x, this.y - 20, "CRIT!", '#facc15'));
+    }
     return real;
   }
 
@@ -618,6 +690,14 @@ export class Monster {
         engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 30, 0, '#8b5cf6'));
       }
     }
+    
+    if (engine.floorModifier === 'regeneration' && engine.ticks % 60 === 0) {
+      if (this.hp < this.maxHp) {
+        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.05);
+        engine.floatingTexts.push(new FloatingText(this.x, this.y, "+Regen", '#22c55e'));
+      }
+    }
+
     let target: {x: number, y: number} | null = engine.player;
     let minDist = Math.hypot(engine.player.x - this.x, engine.player.y - this.y);
     
@@ -638,6 +718,26 @@ export class Monster {
 
     if (target && minDist < 500) {
       if (this.abilityCd > 0) this.abilityCd--;
+
+      if (this.abilityCd <= 0 && this.specialAbility) {
+        if (this.specialAbility === 'teleport' && minDist > 100) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 50 + Math.random() * 50;
+          const nx = target.x + Math.cos(angle) * dist;
+          const ny = target.y + Math.sin(angle) * dist;
+          if (!engine.isWall(nx, ny)) {
+            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 50, 0, '#a855f7'));
+            this.x = nx; this.y = ny;
+            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 50, 0, '#a855f7'));
+            this.abilityCd = 180; // 3 seconds
+          }
+        } else if (this.specialAbility === 'summon' && engine.monsters.length < 30) {
+          engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 60, 0, '#ef4444'));
+          engine.monsters.push(new Monster(this.x + 40, this.y, Math.max(1, this.level - 5), 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+          engine.monsters.push(new Monster(this.x - 40, this.y, Math.max(1, this.level - 5), 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+          this.abilityCd = 600; // 10 seconds
+        }
+      }
 
       let dx = ((target.x - this.x) / minDist) * this.speed;
       let dy = ((target.y - this.y) / minDist) * this.speed;
@@ -697,13 +797,252 @@ export class Monster {
             else if ('hp' in target) (target as any).hp -= this.atk * 1.5;
             this.abilityCd = 120;
           }
-        } else if (this.sprite === 'boss') {
-          for (let i = -1; i <= 1; i++) {
-            const angle = Math.atan2(target.y - this.y, target.x - this.x) + i * 0.2;
-            engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(angle), Math.sin(angle), 8, this.atk, 'enemy', '#ef4444', 6, 'fireball'));
+        } else if (this.tier === 'boss') {
+          if (this.hp < this.maxHp * 0.5 && this.bossPhase === 1) {
+            this.bossPhase = 2;
+            engine.floatingTexts.push(new FloatingText(this.x, this.y - 40, "Phase 2!", '#ef4444'));
+            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 150, 0, '#ef4444'));
+            this.hp += this.maxHp * 0.5;
+            this.atk *= 1.2;
+            this.speed *= 1.2;
           }
-          dx *= 5; dy *= 5;
-          this.abilityCd = 90;
+
+          const angle = Math.atan2(target.y - this.y, target.x - this.x);
+          const attackType = Math.random();
+
+          switch (this.sprite) {
+            case 'slime_king':
+              if (this.bossPhase === 1) {
+                dx *= 8; dy *= 8; // Jump
+                engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 40, 0, '#16a34a'));
+                this.abilityCd = 80;
+              } else {
+                if (attackType < 0.5) {
+                  for (let i = 0; i < 5; i++) {
+                    const a = angle + (Math.random() - 0.5) * 2;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 5, this.atk, 'enemy', '#16a34a', 10, 'normal'));
+                  }
+                  this.abilityCd = 100;
+                } else {
+                  if (engine.monsters.length < 20) {
+                    engine.monsters.push(new Monster(this.x + 30, this.y, this.level, 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+                    engine.monsters.push(new Monster(this.x - 30, this.y, this.level, 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+                  }
+                  this.abilityCd = 150;
+                }
+              }
+              break;
+            case 'crystal_golem':
+              if (this.bossPhase === 1) {
+                engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(angle), Math.sin(angle), 10, this.atk * 1.5, 'enemy', '#a855f7', 8, 'normal'));
+                this.abilityCd = 60;
+              } else {
+                if (attackType < 0.5) {
+                  for (let i = 0; i < 8; i++) {
+                    const a = (Math.PI * 2 / 8) * i;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 6, this.atk, 'enemy', '#a855f7', 6, 'normal'));
+                  }
+                  this.abilityCd = 100;
+                } else {
+                  this.shieldHp = this.maxHp * 0.3;
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 60, 0, '#3b82f6'));
+                  this.abilityCd = 200;
+                }
+              }
+              break;
+            case 'vampire_lord':
+              if (this.bossPhase === 1) {
+                for (let i = -1; i <= 1; i++) {
+                  const a = angle + i * 0.2;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 12, this.atk, 'enemy', '#ef4444', 4, 'normal'));
+                }
+                this.abilityCd = 70;
+              } else {
+                if (attackType < 0.5) {
+                  this.isInvisible = true;
+                  this.invisibilityTimer = 60;
+                  dx = Math.cos(angle) * 15; dy = Math.sin(angle) * 15;
+                  this.abilityCd = 90;
+                } else {
+                  for (let i = 0; i < 5; i++) {
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(angle + (Math.random()-0.5)), Math.sin(angle + (Math.random()-0.5)), 8, this.atk, 'enemy', '#dc2626', 6, 'normal'));
+                  }
+                  this.abilityCd = 120;
+                }
+              }
+              break;
+            case 'ice_dragon':
+              if (this.bossPhase === 1) {
+                for (let i = -2; i <= 2; i++) {
+                  const a = angle + i * 0.1;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 7, this.atk, 'enemy', '#38bdf8', 6, 'normal'));
+                }
+                this.abilityCd = 80;
+              } else {
+                if (attackType < 0.5) {
+                  for (let i = 0; i < 12; i++) {
+                    const a = (Math.PI * 2 / 12) * i;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 5, this.atk, 'enemy', '#e0f2fe', 8, 'normal'));
+                  }
+                  this.abilityCd = 120;
+                } else {
+                  engine.particles.push(new Particle(target.x, target.y, 'ring', 0, 80, 0, '#7dd3fc'));
+                  if (minDist < 80) target.hp -= this.atk * 2;
+                  this.abilityCd = 150;
+                }
+              }
+              break;
+            case 'lich':
+              if (this.bossPhase === 1) {
+                engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(angle), Math.sin(angle), 6, this.atk * 1.5, 'enemy', '#ef4444', 10, 'fireball'));
+                this.abilityCd = 90;
+              } else {
+                if (attackType < 0.5) {
+                  if (engine.monsters.length < 25) {
+                    for(let i=0; i<3; i++) engine.monsters.push(new Monster(this.x + (Math.random()-0.5)*100, this.y + (Math.random()-0.5)*100, this.level, 'low', engine.player, 'cave', engine.floorModifier, engine.floor));
+                  }
+                  this.abilityCd = 180;
+                } else {
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 150, 0, '#ef4444'));
+                  if (minDist < 150) target.hp -= this.atk * 2.5;
+                  this.abilityCd = 150;
+                }
+              }
+              break;
+            case 'shadow_demon':
+              if (this.bossPhase === 1) {
+                for (let i = -1; i <= 1; i++) {
+                  const a = angle + i * 0.3;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 9, this.atk, 'enemy', '#8b5cf6', 6, 'fireball'));
+                }
+                this.abilityCd = 80;
+              } else {
+                if (attackType < 0.5) {
+                  this.hp = Math.min(this.maxHp, this.hp + this.atk);
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 40, 0, '#a855f7'));
+                  if (minDist < 100) target.hp -= this.atk;
+                  this.abilityCd = 100;
+                } else {
+                  dx = Math.cos(angle) * 20; dy = Math.sin(angle) * 20;
+                  this.abilityCd = 60;
+                }
+              }
+              break;
+            case 'mech_behemoth':
+              if (this.bossPhase === 1) {
+                engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(angle), Math.sin(angle), 15, this.atk * 2, 'enemy', '#cbd5e1', 8, 'normal'));
+                this.abilityCd = 100;
+              } else {
+                if (attackType < 0.5) {
+                  for (let i = 0; i < 10; i++) {
+                    const a = angle + (Math.random() - 0.5);
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 8, this.atk, 'enemy', '#fcd34d', 4, 'normal'));
+                  }
+                  this.abilityCd = 120;
+                } else {
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 120, 0, '#eab308'));
+                  if (minDist < 120) target.hp -= this.atk * 1.5;
+                  this.abilityCd = 150;
+                }
+              }
+              break;
+            case 'seraphim':
+              if (this.bossPhase === 1) {
+                for (let i = -2; i <= 2; i++) {
+                  const a = angle + i * 0.15;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 10, this.atk, 'enemy', '#ffffff', 6, 'normal'));
+                }
+                this.abilityCd = 70;
+              } else {
+                if (attackType < 0.5) {
+                  this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.1);
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 60, 0, '#fcd34d'));
+                  this.abilityCd = 150;
+                } else {
+                  engine.particles.push(new Particle(target.x, target.y, 'ring', 0, 100, 0, '#ffffff'));
+                  if (minDist < 100) target.hp -= this.atk * 2;
+                  this.abilityCd = 120;
+                }
+              }
+              break;
+            case 'ancient_knight':
+              if (this.bossPhase === 1) {
+                dx = Math.cos(angle) * 15; dy = Math.sin(angle) * 15;
+                this.abilityCd = 60;
+              } else {
+                if (attackType < 0.5) {
+                  for (let i = 0; i < 16; i++) {
+                    const a = (Math.PI * 2 / 16) * i;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 7, this.atk, 'enemy', '#ef4444', 6, 'fireball'));
+                  }
+                  this.abilityCd = 120;
+                } else {
+                  if (engine.monsters.length < 20) {
+                    for(let i=0; i<2; i++) engine.monsters.push(new Monster(this.x + (Math.random()-0.5)*100, this.y + (Math.random()-0.5)*100, this.level, 'med', engine.player, 'temple', engine.floorModifier, engine.floor));
+                  }
+                  this.abilityCd = 180;
+                }
+              }
+              break;
+            case 'tower_god':
+              if (this.bossPhase === 1) {
+                for (let i = -3; i <= 3; i++) {
+                  const a = angle + i * 0.1;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 12, this.atk, 'enemy', '#a855f7', 8, 'fireball'));
+                }
+                this.abilityCd = 60;
+              } else {
+                if (attackType < 0.33) {
+                  engine.particles.push(new Particle(target.x, target.y, 'ring', 0, 150, 0, '#000000'));
+                  if (minDist < 150) target.hp -= this.atk * 3;
+                  this.abilityCd = 150;
+                } else if (attackType < 0.66) {
+                  for (let i = 0; i < 20; i++) {
+                    const a = (Math.PI * 2 / 20) * i;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 8, this.atk, 'enemy', '#ffffff', 10, 'normal'));
+                  }
+                  this.abilityCd = 120;
+                } else {
+                  if (engine.monsters.length < 15) {
+                    const pastBosses = ['slime_king', 'crystal_golem', 'vampire_lord'];
+                    const b = new Monster(this.x + 50, this.y, this.level - 10, 'boss', engine.player, 'temple', engine.floorModifier, engine.floor);
+                    b.sprite = pastBosses[Math.floor(Math.random() * pastBosses.length)];
+                    b.maxHp = b.hp = this.maxHp * 0.2;
+                    engine.monsters.push(b);
+                  }
+                  this.abilityCd = 300;
+                }
+              }
+              break;
+            default:
+              if (this.bossPhase === 1) {
+                for (let i = -1; i <= 1; i++) {
+                  const a = angle + i * 0.2;
+                  engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 8, this.atk, 'enemy', '#ef4444', 6, 'fireball'));
+                }
+                dx *= 5; dy *= 5;
+                this.abilityCd = 90;
+              } else {
+                if (attackType < 0.33) {
+                  for (let i = 0; i < 8; i++) {
+                    const a = (Math.PI * 2 / 8) * i;
+                    engine.projectiles.push(new Projectile(this.x, this.y, Math.cos(a), Math.sin(a), 6, this.atk, 'enemy', '#ef4444', 8, 'fireball'));
+                  }
+                  this.abilityCd = 120;
+                } else if (attackType < 0.66) {
+                  if (engine.monsters.length < 20) {
+                    engine.monsters.push(new Monster(this.x + 40, this.y, Math.max(1, this.level - 5), 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+                    engine.monsters.push(new Monster(this.x - 40, this.y, Math.max(1, this.level - 5), 'low', engine.player, 'forest', engine.floorModifier, engine.floor));
+                  }
+                  this.abilityCd = 150;
+                } else {
+                  dx *= 10; dy *= 10;
+                  engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 50, 0, '#ef4444'));
+                  this.abilityCd = 60;
+                }
+              }
+              break;
+          }
         } else if (this.sprite === 'hunter') {
           const skills = ['multishot', 'fireball', 'heal', 'dash'];
           const skill = skills[Math.floor(Math.random() * skills.length)];
@@ -740,7 +1079,7 @@ export class Monster {
           engine.floatingTexts.push(new FloatingText(engine.player.x, engine.player.y, `-${dmg}`, '#ef4444'));
           if (engine.player.passives.has('thorns')) {
             const thornDmg = Math.max(1, Math.floor(dmg * 0.5));
-            this.takeDamage(thornDmg);
+            this.takeDamage(thornDmg, engine);
             engine.floatingTexts.push(new FloatingText(this.x, this.y, `-${thornDmg}`, '#eab308'));
           }
         } else if (target instanceof Shadow || target instanceof Ally) {
@@ -760,11 +1099,44 @@ export class Monster {
       ctx.filter = 'brightness(2) drop-shadow(0 0 5px white)';
     }
     const sprite = getSprite(this.sprite, this.r === 40 ? 8 : 4);
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, this.x - cx - this.r, this.y - cy - this.r, this.r * 2, this.r * 2);
+    ctx.shadowBlur = 0;
+    
+    // Shield
+    if (this.shieldHp > 0) {
+      ctx.beginPath();
+      ctx.arc(this.x - cx, this.y - cy, this.r + 5, 0, Math.PI * 2);
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.5 + Math.sin(Date.now() / 100) * 0.2;
+      ctx.stroke();
+      ctx.globalAlpha = 1.0;
+    }
+
+    // Elemental Indicators
+    if (this.elementalWeakness || this.elementalResistance) {
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      if (this.elementalWeakness) {
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText(`W:${this.elementalWeakness.charAt(0).toUpperCase()}`, this.x - cx - 10, this.y - cy - this.r - 15);
+      }
+      if (this.elementalResistance) {
+        ctx.fillStyle = '#3b82f6';
+        ctx.fillText(`R:${this.elementalResistance.charAt(0).toUpperCase()}`, this.x - cx + 10, this.y - cy - this.r - 15);
+      }
+    }
+
     ctx.restore();
     
     ctx.fillStyle = '#ef4444';
     ctx.fillRect(this.x - cx - 15, this.y - cy - this.r - 10, 30 * (this.hp / this.maxHp), 4);
+    if (this.shieldHp > 0) {
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(this.x - cx - 15, this.y - cy - this.r - 6, 30 * (this.shieldHp / (this.maxHp * 0.5)), 2);
+    }
   }
 }
 
@@ -793,7 +1165,7 @@ export class Shadow {
       if (dx < 0) this.facingLeft = true; if (dx > 0) this.facingLeft = false;
 
       if (minDist < this.r + target.r + 10 && this.cd <= 0) {
-        const dmg = target.takeDamage(this.atk);
+        const dmg = target.takeDamage(this.atk, engine);
         engine.floatingTexts.push(new FloatingText(target.x, target.y, `-${dmg}`, '#a855f7'));
         this.cd = 30;
       }
@@ -814,7 +1186,10 @@ export class Shadow {
     ctx.translate(this.x - cx, this.y - cy);
     if (this.facingLeft) ctx.scale(-1, 1);
     const sprite = getSprite('shadow', 4);
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, -16, -16, 32, 32);
+    ctx.shadowBlur = 0;
     ctx.restore();
     ctx.fillStyle = '#a855f7';
     ctx.fillRect(this.x - cx - 15, this.y - cy - 26, 30 * (this.hp / this.maxHp), 4);
@@ -868,7 +1243,10 @@ export class Ally {
     ctx.translate(this.x - cx, this.y - cy);
     if (this.facingLeft) ctx.scale(-1, 1);
     const sprite = getSprite('hunter', 4);
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, -16, -16, 32, 32);
+    ctx.shadowBlur = 0;
     ctx.restore();
     ctx.fillStyle = '#22c55e';
     ctx.fillRect(this.x - cx - 15, this.y - cy - 26, 30 * (this.hp / this.maxHp), 4);
@@ -905,7 +1283,15 @@ export class Projectile {
     if (this.owner === 'player') {
       for (const m of engine.monsters) {
         if (Math.hypot(m.x - this.x, m.y - this.y) < m.r + this.r) {
-          const d = m.takeDamage(this.damage);
+          if (engine.floorModifier === 'reflection' && Math.random() < 0.3) {
+            this.owner = 'enemy';
+            this.dx = -this.dx;
+            this.dy = -this.dy;
+            this.color = '#ef4444';
+            engine.floatingTexts.push(new FloatingText(m.x, m.y, "Reflect!", '#eab308'));
+            return;
+          }
+          const d = m.takeDamage(this.damage, engine);
           if (engine.player.passives.has('lifesteal')) engine.player.hp = Math.min(engine.player.hpTotal, engine.player.hp + d * 0.2);
           engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
           if (this.type === 'fireball') this.explode(engine);
@@ -971,7 +1357,7 @@ export class Projectile {
     if (this.owner === 'player') {
       for (const m of engine.monsters) {
         if (Math.hypot(m.x - this.x, m.y - this.y) < 80 + m.r) {
-          m.takeDamage(this.damage * 0.5);
+          m.takeDamage(this.damage * 0.5, engine);
           engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${Math.floor(this.damage * 0.5)}`, '#ef4444'));
         }
       }
@@ -1030,7 +1416,11 @@ export class Chest {
   constructor(x: number, y: number) { this.x = x; this.y = y; }
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     const sprite = getSprite('chest', 4);
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, this.x - cx - 16, this.y - cy - 16, 32, 32);
+    ctx.restore();
     if (!this.opened) { ctx.fillStyle = '#eab308'; ctx.fillText("?", this.x - cx - 4, this.y - cy - 20); }
   }
 }
@@ -1040,7 +1430,11 @@ export class HunterNPC {
   constructor(x: number, y: number) { this.x = x; this.y = y; }
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     const sprite = getSprite('hunter', 4);
+    ctx.save();
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.drawImage(sprite, this.x - cx - 16, this.y - cy - 16, 32, 32);
+    ctx.restore();
     ctx.fillStyle = '#3b82f6'; ctx.fillText("!", this.x - cx - 4, this.y - cy - 20);
   }
 }
@@ -1143,8 +1537,10 @@ export class GameEngine {
   onPlayerUpdate: (p: Player) => void;
   interactingHunter: HunterNPC | null = null;
   theme: 'cave' | 'temple' | 'forest' | 'snow' | 'volcano' = 'cave';
+  floorModifier: import('./types').FloorModifier = 'none';
   stopped: boolean = false;
   paused: boolean = false;
+  transitioning: boolean = false;
   screenShake: number = 0;
 
   constructor(canvas: HTMLCanvasElement, onStateChange: (s: GameState) => void, onPlayerUpdate: (p: Player) => void) {
@@ -1168,12 +1564,16 @@ export class GameEngine {
   }
 
   generateFloor() {
+    this.transitioning = false;
     this.monsters = []; this.projectiles = []; this.corpses = []; this.chests = []; this.hunters = [];
     this.player.shadows = []; this.particles = []; this.floatingTexts = [];
     this.input.keys = {}; this.input.mouse.left = false; this.input.mouse.right = false;
     
     const themes: ('cave' | 'temple' | 'forest' | 'snow' | 'volcano')[] = ['forest', 'cave', 'snow', 'temple', 'volcano'];
     this.theme = themes[Math.floor((this.floor - 1) / 2) % themes.length];
+    
+    const modifiers: import('./types').FloorModifier[] = ['none', 'poison', 'darkness', 'reflection', 'regeneration', 'elemental'];
+    this.floorModifier = Math.random() < 0.3 ? modifiers[Math.floor(Math.random() * (modifiers.length - 1)) + 1] : 'none';
     
     this.grid = Array(this.mapSize).fill(0).map(() => Array(this.mapSize).fill(1));
     const cx = Math.floor(this.mapSize / 2); const cy = Math.floor(this.mapSize / 2);
@@ -1207,7 +1607,7 @@ export class GameEngine {
     const numMonsters = isBoss ? 1 : 5 + Math.floor(this.floor * 1.5);
     for (let i = 0; i < numMonsters; i++) {
       const {x, y} = this.getValidPos();
-      this.monsters.push(new Monster(x, y, this.floor, tier, this.player, this.theme));
+      this.monsters.push(new Monster(x, y, Math.max(this.floor, this.player.level), tier, this.player, this.theme, this.floorModifier, this.floor));
     }
 
     const numChests = Math.floor(Math.random() * 3) + 1;
@@ -1236,10 +1636,11 @@ export class GameEngine {
   }
 
   isWall(x: number, y: number) {
+    if (isNaN(x) || isNaN(y)) return true;
     const tx = Math.floor(x / this.tileSize);
     const ty = Math.floor(y / this.tileSize);
     if (tx < 0 || tx >= this.mapSize || ty < 0 || ty >= this.mapSize) return true;
-    return this.grid[ty][tx] === 1;
+    return this.grid[ty] && this.grid[ty][tx] === 1;
   }
 
   generateItem(level: number): Item {
@@ -1247,7 +1648,7 @@ export class GameEngine {
     let rarity: Item['rarity'] = 'Common';
     if (r > 0.95) rarity = 'Mythic'; else if (r > 0.8) rarity = 'Legendary'; else if (r > 0.5) rarity = 'Epic'; else if (r > 0.2) rarity = 'Rare';
     const mult = { 'Common': 1, 'Rare': 2, 'Epic': 4, 'Legendary': 7, 'Mythic': 12 }[rarity];
-    const types: Item['type'][] = ['weapon', 'armor', 'accessory', 'consumable', 'active_skill', 'passive_skill'];
+    const types: Item['type'][] = ['weapon', 'armor', 'accessory', 'consumable', 'active_skill', 'active_skill', 'passive_skill', 'passive_skill'];
     const type = types[Math.floor(Math.random() * types.length)];
     const stats: any = {}; let name = `${rarity} ${type}`; let skillId = undefined;
 
@@ -1258,17 +1659,26 @@ export class GameEngine {
       const prefix = prefixes[Math.min(prefixes.length - 1, Math.floor(level / 10) + (mult > 4 ? 2 : 0))];
       const suffix = suffixes[Math.floor(Math.random() * suffixes.length)];
       name = `${rarity} ${prefix} Weapon ${mult > 2 ? suffix : ''}`.trim();
+      
+      if (Math.random() < 0.3 * mult) {
+        const elements: ('fire' | 'ice' | 'lightning' | 'poison')[] = ['fire', 'ice', 'lightning', 'poison'];
+        stats.elementalDamage = { type: elements[Math.floor(Math.random() * elements.length)], amount: Math.floor(level * mult * 1.5) };
+      }
+      if (Math.random() < 0.2 * mult) stats.critChance = Math.floor(5 * mult);
+      if (Math.random() < 0.1 * mult) stats.lifeSteal = Math.floor(2 * mult);
     }
     if (type === 'armor') {
       stats.def = Math.floor((2 + level) * mult); stats.maxHp = Math.floor((20 + level * 5) * mult);
       const prefixes = ['Tattered', 'Leather', 'Chainmail', 'Platemail', 'Dragonscale', 'Shadow', 'Void'];
       const prefix = prefixes[Math.min(prefixes.length - 1, Math.floor(level / 10) + (mult > 4 ? 2 : 0))];
       name = `${rarity} ${prefix} Armor`;
+      if (Math.random() < 0.1 * mult) stats.maxMp = Math.floor(10 * mult);
     }
     if (type === 'accessory') {
       stats.atk = Math.floor(level * mult); stats.maxMp = Math.floor((10 + level * 2) * mult);
       const types = ['Ring', 'Amulet', 'Pendant', 'Charm'];
       name = `${rarity} ${types[Math.floor(Math.random() * types.length)]} of Power`;
+      if (Math.random() < 0.3 * mult) stats.critChance = Math.floor(3 * mult);
     }
     if (type === 'consumable') {
       stats.healHp = 50 * mult; stats.healMp = 20 * mult;
@@ -1305,7 +1715,7 @@ export class GameEngine {
       this.allies.push(new Ally(h.x, h.y, this.player));
       this.floatingTexts.push(new FloatingText(h.x, h.y, "Joined Party!", '#22c55e'));
     } else {
-      this.monsters.push(new Monster(h.x, h.y, this.floor, 'hunter', this.player, this.theme));
+      this.monsters.push(new Monster(h.x, h.y, Math.max(this.floor, this.player.level), 'hunter', this.player, this.theme, this.floorModifier, this.floor));
       this.floatingTexts.push(new FloatingText(h.x, h.y, "Betrayal!", '#ef4444'));
     }
     this.hunters = this.hunters.filter(x => x !== h);
@@ -1347,7 +1757,7 @@ export class GameEngine {
       if (m.hp <= 0) {
         this.player.gainXp(m.xp, this); this.player.gold += m.gold;
         this.corpses.push(new Corpse(m.x, m.y, m.level, m.maxHp, m.atk, m.def));
-        if (Math.random() < 0.2) this.player.inventory.push(this.generateItem(this.floor));
+        if (Math.random() < 0.35) this.player.inventory.push(this.generateItem(this.floor));
         this.monsters.splice(i, 1);
       }
     }
@@ -1382,7 +1792,8 @@ export class GameEngine {
       if (this.floatingTexts[i].life <= 0) this.floatingTexts.splice(i, 1);
     }
 
-    if (this.monsters.length === 0) {
+    if (this.monsters.length === 0 && !this.transitioning) {
+      this.transitioning = true;
       this.floor++; this.player.pts += 5;
       this.onStateChange('TRANSITION');
       return;
@@ -1453,6 +1864,17 @@ export class GameEngine {
     gradient.addColorStop(1, tint);
     this.ctx.fillStyle = gradient;
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    if (this.floorModifier === 'darkness') {
+      const darkGradient = this.ctx.createRadialGradient(
+        this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.1,
+        this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.4
+      );
+      darkGradient.addColorStop(0, 'rgba(0,0,0,0)');
+      darkGradient.addColorStop(1, 'rgba(0,0,0,0.98)');
+      this.ctx.fillStyle = darkGradient;
+      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
   }
 
   loop = () => {
