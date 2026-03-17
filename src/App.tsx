@@ -11,6 +11,7 @@ export default function App() {
   const [engine, setEngine] = useState<GameEngine | null>(null);
   const [playerData, setPlayerData] = useState<Player | null>(null);
   const [replacingSkill, setReplacingSkill] = useState<Item | null>(null);
+  const [invFilter, setInvFilter] = useState<'all' | 'equipment' | 'consumable' | 'skill'>('all');
 
   useEffect(() => {
     const handleResize = () => {
@@ -252,7 +253,7 @@ export default function App() {
                   <span className="text-white/70">{playerData.skillCd > 0 ? (playerData.skillCd / 60).toFixed(1) + 's' : 'READY'}</span>
                 </div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-purple-500 transition-all duration-200 shadow-[0_0_10px_rgba(168,85,247,0.8)]" style={{width: `${playerData.skillCd > 0 ? (playerData.skillCd / 150) * 100 : 100}%`}}></div>
+                  <div className="h-full bg-purple-500 transition-all duration-200 shadow-[0_0_10px_rgba(168,85,247,0.8)]" style={{width: `${playerData.skillCd > 0 ? (playerData.skillCd / playerData.maxSkillCd) * 100 : 100}%`}}></div>
                 </div>
               </div>
               
@@ -266,6 +267,11 @@ export default function App() {
             <div className="bg-[#0a0a0a]/80 backdrop-blur-md border border-white/10 px-8 py-4 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.5)] text-center">
               <div className="text-white/40 text-[10px] font-mono uppercase tracking-[0.3em] mb-2">Floor</div>
               <div className="text-4xl font-light text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{engine.floor} <span className="text-white/20 text-2xl">/ 100</span></div>
+              {engine.floorModifier !== 'none' && (
+                <div className="mt-2 text-[10px] font-mono uppercase tracking-widest text-purple-400 animate-pulse">
+                  Modifier: {engine.floorModifier}
+                </div>
+              )}
             </div>
           </div>
 
@@ -461,9 +467,22 @@ export default function App() {
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8 z-50">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden shadow-2xl">
             <div className="p-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
-              <h2 className="text-xl font-medium tracking-widest uppercase flex items-center gap-3 text-white/90">
-                <Package className="text-white/50" size={20}/> Inventory
-              </h2>
+              <div className="flex items-center gap-6">
+                <h2 className="text-xl font-medium tracking-widest uppercase flex items-center gap-3 text-white/90">
+                  <Package className="text-white/50" size={20}/> Inventory
+                </h2>
+                <div className="flex gap-2">
+                  {['all', 'equipment', 'consumable', 'skill'].map(filter => (
+                    <button
+                      key={filter}
+                      onClick={() => setInvFilter(filter as any)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold tracking-widest uppercase transition-colors ${invFilter === filter ? 'bg-white/20 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}
+                    >
+                      {filter}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <button onClick={resumeGame} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white"><X size={20}/></button>
             </div>
             <div className="flex-1 overflow-y-auto p-8">
@@ -474,7 +493,13 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {playerData.inventory.map(item => {
+                  {playerData.inventory.filter(item => {
+                    if (invFilter === 'all') return true;
+                    if (invFilter === 'equipment') return ['weapon', 'armor', 'accessory'].includes(item.type);
+                    if (invFilter === 'consumable') return item.type === 'consumable';
+                    if (invFilter === 'skill') return ['active_skill', 'passive_skill'].includes(item.type);
+                    return true;
+                  }).map(item => {
                     const colors = {
                       Common: 'border-white/10 text-white/70',
                       Rare: 'border-blue-500/30 text-blue-400',
@@ -482,17 +507,59 @@ export default function App() {
                       Legendary: 'border-yellow-500/30 text-yellow-400',
                       Mythic: 'border-red-500/30 text-red-400'
                     };
+                    
+                    const equippedSameType = playerData.inventory.find(i => i.type === item.type && i.equipped && i.id !== item.id);
+                    
+                    const getStatDisplay = (statName: 'atk' | 'def' | 'maxHp' | 'maxMp' | 'critChance' | 'lifeSteal', label: string) => {
+                      if (!item.stats[statName]) return null;
+                      const val = item.stats[statName]!;
+                      let isBetter = false;
+                      let diff = 0;
+                      let isWorse = false;
+                      
+                      if (!item.equipped && ['weapon', 'armor', 'accessory'].includes(item.type)) {
+                        const equippedVal = equippedSameType?.stats[statName] || 0;
+                        if (val > equippedVal) {
+                          isBetter = true;
+                          diff = val - equippedVal;
+                        } else if (val < equippedVal) {
+                          isWorse = true;
+                          diff = equippedVal - val;
+                        }
+                      }
+                      
+                      return (
+                        <span className={`px-2 py-1 rounded ${isBetter ? 'bg-green-500/20 text-green-400 font-bold' : isWorse ? 'bg-red-500/20 text-red-400' : 'bg-white/5'}`}>
+                          {label} +{val}{statName === 'critChance' || statName === 'lifeSteal' ? '%' : ''} {isBetter && `(↑${diff})`} {isWorse && `(↓${diff})`}
+                        </span>
+                      );
+                    };
+
+                    const getElementalDisplay = () => {
+                      if (!item.stats.elementalDamage) return null;
+                      const { type, amount } = item.stats.elementalDamage;
+                      const colors = { fire: 'text-red-400', ice: 'text-blue-400', lightning: 'text-yellow-400', poison: 'text-green-400' };
+                      return (
+                        <span className={`px-2 py-1 rounded bg-white/5 ${colors[type]}`}>
+                          {type.toUpperCase()} +{amount}
+                        </span>
+                      );
+                    };
+
                     return (
                       <div key={item.id} className={`relative p-5 rounded-xl border bg-white/[0.02] flex flex-col justify-between gap-4 transition-all hover:bg-white/[0.04] ${colors[item.rarity]} ${item.equipped ? 'ring-1 ring-white/50 bg-white/[0.05]' : ''}`}>
                         {item.equipped && <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-white/80" />}
                         <div>
-                          <div className="text-xs font-mono uppercase tracking-wider opacity-60 mb-1">{item.rarity} {item.type}</div>
+                          <div className="text-xs font-mono uppercase tracking-wider opacity-60 mb-1">{item.rarity} {item.type.replace('_', ' ')}</div>
                           <div className="font-medium text-lg leading-tight text-white mb-3">{item.name}</div>
                           <div className="flex flex-wrap gap-2 text-xs font-mono text-white/50">
-                            {item.stats.atk && <span className="bg-white/5 px-2 py-1 rounded">ATK +{item.stats.atk}</span>}
-                            {item.stats.def && <span className="bg-white/5 px-2 py-1 rounded">DEF +{item.stats.def}</span>}
-                            {item.stats.maxHp && <span className="bg-white/5 px-2 py-1 rounded">HP +{item.stats.maxHp}</span>}
-                            {item.stats.maxMp && <span className="bg-white/5 px-2 py-1 rounded">MP +{item.stats.maxMp}</span>}
+                            {getStatDisplay('atk', 'ATK')}
+                            {getStatDisplay('def', 'DEF')}
+                            {getStatDisplay('maxHp', 'HP')}
+                            {getStatDisplay('maxMp', 'MP')}
+                            {getStatDisplay('critChance', 'CRIT')}
+                            {getStatDisplay('lifeSteal', 'LIFESTEAL')}
+                            {getElementalDisplay()}
                             {item.stats.healHp && <span className="bg-green-500/20 text-green-400 px-2 py-1 rounded">Heal {item.stats.healHp} HP</span>}
                             {item.stats.healMp && <span className="bg-blue-500/20 text-blue-400 px-2 py-1 rounded">Heal {item.stats.healMp} MP</span>}
                           </div>
