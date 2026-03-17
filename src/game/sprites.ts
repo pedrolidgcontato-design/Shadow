@@ -267,6 +267,106 @@ export const ASCII_SPRITES: Record<string, string[]> = {
     '.#R##R#.',
     '.##..##.'
   ],
+  slime_king: [
+    '.#YYYY#.',
+    '#Y#YY#Y#',
+    '#OOOOOO#',
+    '#O#OO#O#',
+    '#OOOOOO#',
+    '#OOOOOO#',
+    '#OOOOOO#',
+    '.######.'
+  ],
+  crystal_golem: [
+    '..####..',
+    '.#PPPP#.',
+    '##PPPP##',
+    '#PPPPPP#',
+    '#PPPPPP#',
+    '##PPPP##',
+    '.#P##P#.',
+    '.##..##.'
+  ],
+  vampire_lord: [
+    '..####..',
+    '.#DDDD#.',
+    '.#S##S#.',
+    '##RRRR##',
+    '#DRRRRD#',
+    '#DRRRRD#',
+    '.#D##D#.',
+    '.##..##.'
+  ],
+  ice_dragon: [
+    '..####..',
+    '.#IIII#.',
+    '#I#II#I#',
+    '#IIIIII#',
+    '##IIII##',
+    '#IIIIII#',
+    '#I####I#',
+    '##....##'
+  ],
+  lich: [
+    '..####..',
+    '.#WWWW#.',
+    '.#W##W#.',
+    '##DDDD##',
+    '#DDRDDD#',
+    '#DDDDDD#',
+    '.#D##D#.',
+    '.##..##.'
+  ],
+  shadow_demon: [
+    '#......#',
+    '.#....#.',
+    '..####..',
+    '.#wwww#.',
+    '##DDDD##',
+    '#DDDDDD#',
+    '.#D##D#.',
+    '.##..##.'
+  ],
+  mech_behemoth: [
+    '..####..',
+    '.#MMMM#.',
+    '#M#MM#M#',
+    '#MMMMMM#',
+    '##MMMM##',
+    '#MMMMMM#',
+    '.#M##M#.',
+    '.##..##.'
+  ],
+  seraphim: [
+    '#......#',
+    '.#YYYY#.',
+    '..####..',
+    '.#WWWW#.',
+    '##WWWW##',
+    '#WWWWWW#',
+    '.#W##W#.',
+    '.##..##.'
+  ],
+  ancient_knight: [
+    '..####..',
+    '.#DDDD#.',
+    '.#D##D#.',
+    '##DDDD##',
+    '#MDDDDM#',
+    '#MDDDDM#',
+    '.#D##D#.',
+    '.##..##.'
+  ],
+  tower_god: [
+    '#Y####Y#',
+    'Y#WWWW#Y',
+    '##W##W##',
+    '#WWWWWW#',
+    '#WDDDDW#',
+    '#DDDDDD#',
+    '#D####D#',
+    '##....##'
+  ],
   shadow: [
     '........',
     '..####..',
