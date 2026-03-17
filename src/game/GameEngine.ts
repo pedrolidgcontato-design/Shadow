@@ -47,6 +47,9 @@ export class Player {
   isChanneling: boolean = false;
   channelTimer: number = 0;
   channelAngle: number = 0;
+  hitTimer: number = 0;
+  stamina: number = 100;
+  maxStamina: number = 100;
 
   constructor(x: number, y: number, classType: ClassType) {
     this.x = x; this.y = y; this.classType = classType;
@@ -75,7 +78,7 @@ export class Player {
     this.speed = this.passives.has('speed_boost') ? this.baseSpeed * 1.5 : this.baseSpeed;
   }
 
-  gainXp(amount: number) {
+  gainXp(amount: number, engine: GameEngine) {
     this.xp += amount;
     let leveled = false;
     while (this.xp >= this.xpNext) {
@@ -86,7 +89,15 @@ export class Player {
       leveled = true;
     }
     this.recalc();
-    if (leveled) { this.hp = this.hpTotal; this.mp = this.mpTotal; }
+    if (leveled) { 
+      this.hp = this.hpTotal; 
+      this.mp = this.mpTotal; 
+      engine.floatingTexts.push(new FloatingText(this.x, this.y - 20, 'LEVEL UP!', '#eab308'));
+      engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 40, 0, '#eab308'));
+      for (let i = 0; i < 20; i++) {
+        engine.particles.push(new Particle(this.x, this.y, 'spark', Math.random() * Math.PI * 2, 30, 2, '#eab308'));
+      }
+    }
   }
 
   update(input: InputManager, engine: GameEngine) {
@@ -95,18 +106,40 @@ export class Player {
     if (input.keys['s']) dy += 1;
     if (input.keys['a']) dx -= 1;
     if (input.keys['d']) dx += 1;
+    
+    let currentSpeed = this.speed;
+    if (input.keys['shift'] && this.stamina > 0 && (dx !== 0 || dy !== 0)) {
+      currentSpeed *= 1.8;
+      this.stamina -= 1;
+      if (engine.ticks % 3 === 0) {
+        engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 15, 0.5, '#ffffff'));
+      }
+    } else {
+      if (this.stamina < this.maxStamina) this.stamina = Math.min(this.maxStamina, this.stamina + 0.5);
+    }
+
     if (dx !== 0 || dy !== 0) {
       const len = Math.hypot(dx, dy);
-      const nx = this.x + (dx / len) * this.speed;
-      const ny = this.y + (dy / len) * this.speed;
+      const nx = this.x + (dx / len) * currentSpeed;
+      const ny = this.y + (dy / len) * currentSpeed;
       if (!engine.isWall(nx, this.y)) this.x = nx;
       if (!engine.isWall(this.x, ny)) this.y = ny;
       if (dx < 0) this.facingLeft = true;
       if (dx > 0) this.facingLeft = false;
+      
+      // Trail particles
+      if (Math.random() < 0.3) {
+        engine.particles.push(new Particle(
+          this.x + (Math.random() - 0.5) * 10,
+          this.y + 10 + (Math.random() - 0.5) * 5,
+          'arc', Math.PI / 2, 10, 2, 'rgba(255, 255, 255, 0.5)'
+        ));
+      }
     }
 
     if (this.atkCd > 0) this.atkCd--;
     if (this.skillCd > 0) this.skillCd--;
+    if (this.hitTimer > 0) this.hitTimer--;
     if (this.mp < this.mpTotal && engine.ticks % 10 === 0) this.mp++;
 
     // Passives
@@ -147,32 +180,36 @@ export class Player {
       else this.facingLeft = false;
 
       if (this.classType === 'warrior') {
-        const range = 60;
+        const range = 80;
         engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range, 0.8, '#94a3b8'));
+        engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range * 0.7, 0.8, '#cbd5e1'));
         for (const m of engine.monsters) {
           if (Math.hypot(m.x - this.x, m.y - this.y) < range + m.r) {
             let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - angle);
             if (diff > Math.PI) diff = 2 * Math.PI - diff;
-            if (diff < 0.8) {
+            if (diff < 1.2) {
               const d = m.takeDamage(this.atkTotal);
               if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
               engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
+              engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 20, 1.0, '#ef4444'));
             }
           }
         }
         this.atkCd = 25;
       } else if (this.classType === 'assassin') {
-        const range = 40;
+        const range = 60;
         engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range, 0.8, '#ef4444'));
+        engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range * 0.7, 0.8, '#fca5a5'));
         for (const m of engine.monsters) {
           if (Math.hypot(m.x - this.x, m.y - this.y) < range + m.r) {
             let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - angle);
             if (diff > Math.PI) diff = 2 * Math.PI - diff;
-            if (diff < 1.0) {
+            if (diff < 1.2) {
               const dmg = this.isInvisible ? this.atkTotal * 2 : this.atkTotal;
               const d = m.takeDamage(dmg);
               if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
               engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
+              engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 20, 1.0, '#ef4444'));
             }
           }
         }
@@ -331,16 +368,20 @@ export class Player {
         const angle = Math.atan2(wy - this.y, wx - this.x);
         
         if (skill === 'slash') {
-          const range = 70;
-          engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range, 0.8, '#3b82f6'));
+          const range = 180;
+          engine.screenShake = 3;
+          engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range, 1.0, '#3b82f6'));
+          engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range * 0.8, 1.0, '#60a5fa'));
+          engine.particles.push(new Particle(this.x, this.y, 'slash', angle, range * 0.6, 1.0, '#93c5fd'));
           for (const m of engine.monsters) {
             if (Math.hypot(m.x - this.x, m.y - this.y) < range + m.r) {
               let diff = Math.abs(Math.atan2(m.y - this.y, m.x - this.x) - angle);
               if (diff > Math.PI) diff = 2 * Math.PI - diff;
-              if (diff < 1.0) {
-                const d = m.takeDamage(this.atkTotal * 1.5);
+              if (diff < 1.5) {
+                const d = m.takeDamage(this.atkTotal * 2.5);
                 if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
+                engine.particles.push(new Particle(m.x, m.y, 'spark', angle, 30, 1.0, '#ef4444'));
               }
             }
           }
@@ -369,12 +410,20 @@ export class Player {
         } else if (skill === 'lightning') {
           if (this.mp >= 15) {
             this.mp -= 15;
-            engine.particles.push(new Particle(wx, wy, 'ring', 0, 80, 0, '#eab308'));
+            engine.screenShake = 15;
+            const dist = Math.hypot(wx - this.x, wy - this.y);
+            engine.particles.push(new Particle(this.x, this.y, 'lightning_bolt', angle, dist, 1, '#60a5fa'));
+            engine.particles.push(new Particle(this.x, this.y, 'lightning_bolt', angle, dist, 1, '#93c5fd'));
+            engine.particles.push(new Particle(wx, wy, 'ring', 0, 120, 1, '#3b82f6'));
+            engine.particles.push(new Particle(wx, wy, 'ring', 0, 80, 1, '#ffffff'));
+            for (let j = 0; j < 15; j++) {
+              engine.particles.push(new Particle(wx, wy, 'spark', Math.random() * Math.PI * 2, 60, 1.5, '#60a5fa'));
+            }
             for (const m of engine.monsters) {
-              if (Math.hypot(m.x - wx, m.y - wy) < 80 + m.r) {
-                const d = m.takeDamage(this.atkTotal * 2.5);
+              if (Math.hypot(m.x - wx, m.y - wy) < 120 + m.r) {
+                const d = m.takeDamage(this.atkTotal * 3.0);
                 if (this.passives.has('lifesteal')) this.hp = Math.min(this.hpTotal, this.hp + d * 0.2);
-                engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#eab308'));
+                engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#3b82f6'));
               }
             }
             this.hotbarCd[i] = 80;
@@ -385,7 +434,7 @@ export class Player {
             const heal = this.maxHp * 0.4;
             this.hp = Math.min(this.maxHp, this.hp + heal);
             engine.floatingTexts.push(new FloatingText(this.x, this.y, `+${Math.floor(heal)}`, '#22c55e'));
-            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 40, 0, '#22c55e'));
+            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 60, 1, '#22c55e'));
             this.hotbarCd[i] = 120;
           }
         } else if (skill === 'dash') {
@@ -393,28 +442,35 @@ export class Player {
             this.mp -= 5;
             let dx = Math.cos(angle);
             let dy = Math.sin(angle);
-            let dist = 120;
+            let dist = 200;
             let newX = this.x;
             let newY = this.y;
             for (let j = 0; j < dist; j += 5) {
               if (!engine.isWall(newX + dx * 5, newY + dy * 5)) {
                 newX += dx * 5;
                 newY += dy * 5;
+                if (j % 10 === 0) {
+                  engine.particles.push(new Particle(newX, newY, 'ring', 0, 20, 0.8, '#3b82f6'));
+                  engine.particles.push(new Particle(newX, newY, 'spark', angle + Math.PI + (Math.random()-0.5), 30, 1, '#93c5fd'));
+                }
               } else {
                 break;
               }
             }
             this.x = newX;
             this.y = newY;
-            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 20, 0, '#ffffff'));
+            engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 40, 1, '#ffffff'));
+            engine.screenShake = 5;
             this.hotbarCd[i] = 30;
           }
         } else if (skill === 'meteor') {
           if (this.mp >= 30) {
             this.mp -= 30;
-            engine.particles.push(new Particle(wx, wy, 'ring', 0, 120, 0, '#ef4444'));
+            engine.screenShake = 20;
+            engine.particles.push(new Particle(wx, wy, 'ring', 0, 150, 1, '#ef4444'));
+            engine.particles.push(new Particle(wx, wy, 'ring', 0, 100, 1, '#f97316'));
             for (const m of engine.monsters) {
-              if (Math.hypot(m.x - wx, m.y - wy) < 120 + m.r) {
+              if (Math.hypot(m.x - wx, m.y - wy) < 150 + m.r) {
                 const d = m.takeDamage(this.atkTotal * 4);
                 engine.floatingTexts.push(new FloatingText(m.x, m.y, `-${d}`, '#ef4444'));
               }
@@ -437,8 +493,23 @@ export class Player {
 
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number, mouseX: number, mouseY: number) {
     if (this.isInvisible) ctx.globalAlpha = 0.3;
+    
+    const equippedArmor = this.inventory.find(i => i.equipped && i.type === 'armor');
+    const equippedWeapon = this.inventory.find(i => i.equipped && i.type === 'weapon');
+
     ctx.save();
     ctx.translate(this.x - cx, this.y - cy);
+    
+    let filter = 'none';
+    if (this.hitTimer > 0) {
+      filter = 'brightness(2) drop-shadow(0 0 5px red)';
+    } else if (equippedArmor) {
+      if (equippedArmor.rarity === 'Legendary') filter = 'drop-shadow(0 0 5px gold)';
+      else if (equippedArmor.rarity === 'Mythic') filter = 'drop-shadow(0 0 8px cyan)';
+      else if (equippedArmor.rarity === 'Epic') filter = 'drop-shadow(0 0 5px purple)';
+    }
+    ctx.filter = filter;
+
     if (this.facingLeft) ctx.scale(-1, 1);
     const sprite = getSprite(this.classType, 4);
     ctx.drawImage(sprite, -16, -16, 32, 32);
@@ -451,6 +522,15 @@ export class Player {
     ctx.save();
     ctx.translate(this.x - cx, this.y - cy);
     ctx.rotate(angle);
+    
+    let weaponFilter = 'none';
+    if (equippedWeapon) {
+      if (equippedWeapon.rarity === 'Legendary') weaponFilter = 'drop-shadow(0 0 5px gold) brightness(1.5)';
+      else if (equippedWeapon.rarity === 'Mythic') weaponFilter = 'drop-shadow(0 0 8px cyan) brightness(1.5)';
+      else if (equippedWeapon.rarity === 'Epic') weaponFilter = 'drop-shadow(0 0 5px purple)';
+    }
+    ctx.filter = weaponFilter;
+
     let weaponSpriteName = this.classType + 'Weapon';
     if (this.classType === 'necromancer') weaponSpriteName = 'necromancerWeapon';
     const weaponSprite = getSprite(weaponSpriteName, 4);
@@ -482,6 +562,7 @@ export class Monster {
   level: number; xp: number; gold: number;
   cd: number = 0; abilityCd: number = 0; sprite: string; tier: MobTier;
   isInvisible: boolean = false; invisibilityTimer: number = 0;
+  hitTimer: number = 0;
 
   constructor(x: number, y: number, level: number, tier: MobTier, player: Player, theme: string) {
     this.x = x; this.y = y; this.level = level; this.tier = tier;
@@ -516,18 +597,20 @@ export class Monster {
     }
 
     this.def = Math.floor(this.atk / 2);
-    this.speed = 2.5 + level * 0.1;
+    this.speed = 2.0 + level * 0.08;
     this.xp = this.maxHp; this.gold = this.maxHp / 5;
   }
 
   takeDamage(d: number) {
     const real = Math.max(1, Math.floor(d - this.def / 2));
     this.hp -= real;
+    this.hitTimer = 10;
     return real;
   }
 
   update(engine: GameEngine) {
     if (this.cd > 0) this.cd--;
+    if (this.hitTimer > 0) this.hitTimer--;
     if (this.invisibilityTimer > 0) {
       this.invisibilityTimer--;
       if (this.invisibilityTimer <= 0) {
@@ -611,7 +694,7 @@ export class Monster {
           if (minDist < 60) {
             engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 60, 0, '#eab308'));
             if (target === engine.player) engine.player.hp -= this.atk * 1.5;
-            else target.hp -= this.atk * 1.5;
+            else if ('hp' in target) (target as any).hp -= this.atk * 1.5;
             this.abilityCd = 120;
           }
         } else if (this.sprite === 'boss') {
@@ -653,6 +736,7 @@ export class Monster {
         if (target === engine.player) {
           const dmg = Math.max(1, this.atk - Math.floor(engine.player.defTotal / 2));
           engine.player.hp -= dmg;
+          engine.player.hitTimer = 10;
           engine.floatingTexts.push(new FloatingText(engine.player.x, engine.player.y, `-${dmg}`, '#ef4444'));
           if (engine.player.passives.has('thorns')) {
             const thornDmg = Math.max(1, Math.floor(dmg * 0.5));
@@ -670,10 +754,14 @@ export class Monster {
   }
 
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+    ctx.save();
     if (this.isInvisible) ctx.globalAlpha = 0.2;
+    if (this.hitTimer > 0) {
+      ctx.filter = 'brightness(2) drop-shadow(0 0 5px white)';
+    }
     const sprite = getSprite(this.sprite, this.r === 40 ? 8 : 4);
     ctx.drawImage(sprite, this.x - cx - this.r, this.y - cy - this.r, this.r * 2, this.r * 2);
-    if (this.isInvisible) ctx.globalAlpha = 1.0;
+    ctx.restore();
     
     ctx.fillStyle = '#ef4444';
     ctx.fillRect(this.x - cx - 15, this.y - cy - this.r - 10, 30 * (this.hp / this.maxHp), 4);
@@ -799,6 +887,16 @@ export class Projectile {
   update(engine: GameEngine) {
     this.x += this.dx * this.speed;
     this.y += this.dy * this.speed;
+    
+    // Trail
+    if (Math.random() < 0.5) {
+      engine.particles.push(new Particle(
+        this.x + (Math.random() - 0.5) * this.r,
+        this.y + (Math.random() - 0.5) * this.r,
+        'arc', Math.atan2(this.dy, this.dx) + Math.PI, this.r * 1.5, 1, this.color
+      ));
+    }
+
     if (engine.isWall(this.x, this.y)) {
       if (this.type === 'fireball') this.explode(engine);
       this.alive = false; return;
@@ -831,6 +929,7 @@ export class Projectile {
       if (Math.hypot(engine.player.x - this.x, engine.player.y - this.y) < engine.player.r + this.r) {
         const d = Math.max(1, this.damage - Math.floor(engine.player.defTotal / 2));
         engine.player.hp -= d;
+        engine.player.hitTimer = 10;
         engine.floatingTexts.push(new FloatingText(engine.player.x, engine.player.y, `-${d}`, '#ef4444'));
         hit = true;
       }
@@ -864,7 +963,11 @@ export class Projectile {
   }
 
   explode(engine: GameEngine) {
-    engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 80, 0, '#ef4444'));
+    engine.screenShake = 5;
+    engine.particles.push(new Particle(this.x, this.y, 'ring', 0, 80, 1, '#f97316'));
+    for (let i = 0; i < 10; i++) {
+      engine.particles.push(new Particle(this.x, this.y, 'spark', Math.random() * Math.PI * 2, 40, 1, '#ef4444'));
+    }
     if (this.owner === 'player') {
       for (const m of engine.monsters) {
         if (Math.hypot(m.x - this.x, m.y - this.y) < 80 + m.r) {
@@ -876,6 +979,7 @@ export class Projectile {
       if (Math.hypot(engine.player.x - this.x, engine.player.y - this.y) < 80 + engine.player.r) {
         const d = Math.max(1, Math.floor(this.damage * 0.5) - Math.floor(engine.player.defTotal / 2));
         engine.player.hp -= d;
+        engine.player.hitTimer = 10;
         engine.floatingTexts.push(new FloatingText(engine.player.x, engine.player.y, `-${d}`, '#ef4444'));
       }
       for (const a of engine.allies) {
@@ -896,8 +1000,17 @@ export class Projectile {
   }
 
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
+    ctx.save();
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = this.color;
     ctx.beginPath(); ctx.arc(this.x - cx, this.y - cy, this.r, 0, Math.PI * 2);
     ctx.fillStyle = this.color; ctx.fill();
+    
+    // Core
+    ctx.shadowBlur = 0;
+    ctx.beginPath(); ctx.arc(this.x - cx, this.y - cy, this.r * 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff'; ctx.fill();
+    ctx.restore();
   }
 }
 
@@ -939,12 +1052,15 @@ export class Particle {
   }
   draw(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
     ctx.save(); ctx.translate(this.x - cx, this.y - cy);
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = this.color;
     if (this.type === 'arc') {
       ctx.rotate(this.angle); ctx.beginPath(); ctx.arc(0, 0, this.range, -0.8, 0.8);
-      ctx.strokeStyle = this.color; ctx.lineWidth = 4 * this.life; ctx.stroke();
+      ctx.strokeStyle = this.color; ctx.lineWidth = 6 * this.life; ctx.stroke();
     } else if (this.type === 'ring') {
       ctx.beginPath(); ctx.arc(0, 0, this.range * (1 - this.life), 0, Math.PI * 2);
-      ctx.strokeStyle = this.color; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = this.color; ctx.lineWidth = 6 * this.life; ctx.stroke();
+      ctx.fillStyle = this.color; ctx.globalAlpha = this.life * 0.3; ctx.fill();
     } else if (this.type === 'laser') {
       ctx.rotate(this.angle);
       ctx.fillStyle = this.color;
@@ -953,15 +1069,44 @@ export class Particle {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, -4, this.range, 8);
       ctx.globalAlpha = 1;
-    } else if (this.type === 'slash') {
+    } else if (this.type === 'lightning_bolt') {
       ctx.rotate(this.angle);
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(this.range / 2, -this.range / 2, this.range, 0);
-      ctx.quadraticCurveTo(this.range / 2, this.range / 2, 0, 0);
-      ctx.fillStyle = this.color;
+      let currentX = 0;
+      while (currentX < this.range) {
+        currentX += 20 + Math.random() * 30;
+        if (currentX > this.range) currentX = this.range;
+        const currentY = (Math.random() - 0.5) * 40;
+        ctx.lineTo(currentX, currentY);
+      }
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 10 * this.life;
+      ctx.lineJoin = 'miter';
       ctx.globalAlpha = this.life;
-      ctx.fill();
+      ctx.stroke();
+      
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4 * this.life;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (this.type === 'slash') {
+      ctx.rotate(this.angle);
+      const sweep = 0.8 * Math.PI * this.life;
+      ctx.beginPath();
+      ctx.arc(0, 0, this.range, -sweep / 2, sweep / 2);
+      ctx.strokeStyle = this.color;
+      ctx.lineWidth = 20 * this.life;
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = this.life;
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.arc(0, 0, this.range * 0.95, -sweep / 2.5, sweep / 2.5);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 8 * this.life;
+      ctx.stroke();
+      
       ctx.globalAlpha = 1;
     } else if (this.type === 'spark') {
       ctx.rotate(this.angle);
@@ -999,6 +1144,8 @@ export class GameEngine {
   interactingHunter: HunterNPC | null = null;
   theme: 'cave' | 'temple' | 'forest' | 'snow' | 'volcano' = 'cave';
   stopped: boolean = false;
+  paused: boolean = false;
+  screenShake: number = 0;
 
   constructor(canvas: HTMLCanvasElement, onStateChange: (s: GameState) => void, onPlayerUpdate: (p: Player) => void) {
     this.canvas = canvas; this.ctx = canvas.getContext('2d')!;
@@ -1022,7 +1169,8 @@ export class GameEngine {
 
   generateFloor() {
     this.monsters = []; this.projectiles = []; this.corpses = []; this.chests = []; this.hunters = [];
-    this.player.shadows = [];
+    this.player.shadows = []; this.particles = []; this.floatingTexts = [];
+    this.input.keys = {}; this.input.mouse.left = false; this.input.mouse.right = false;
     
     const themes: ('cave' | 'temple' | 'forest' | 'snow' | 'volcano')[] = ['forest', 'cave', 'snow', 'temple', 'volcano'];
     this.theme = themes[Math.floor((this.floor - 1) / 2) % themes.length];
@@ -1075,12 +1223,15 @@ export class GameEngine {
   }
 
   getValidPos() {
+    let attempts = 0;
     while (true) {
       const x = Math.floor(Math.random() * this.mapSize);
       const y = Math.floor(Math.random() * this.mapSize);
-      if (this.grid[y][x] === 0 && Math.hypot(x * this.tileSize - this.player.x, y * this.tileSize - this.player.y) > 200) {
+      const dist = Math.hypot(x * this.tileSize - this.player.x, y * this.tileSize - this.player.y);
+      if (this.grid[y][x] === 0 && (dist > 400 || attempts > 100)) {
         return { x: x * this.tileSize + this.tileSize / 2, y: y * this.tileSize + this.tileSize / 2 };
       }
+      attempts++;
     }
   }
 
@@ -1154,7 +1305,7 @@ export class GameEngine {
       this.allies.push(new Ally(h.x, h.y, this.player));
       this.floatingTexts.push(new FloatingText(h.x, h.y, "Joined Party!", '#22c55e'));
     } else {
-      this.monsters.push(new Monster(h.x, h.y, this.floor, 'hunter', this.player));
+      this.monsters.push(new Monster(h.x, h.y, this.floor, 'hunter', this.player, this.theme));
       this.floatingTexts.push(new FloatingText(h.x, h.y, "Betrayal!", '#ef4444'));
     }
     this.hunters = this.hunters.filter(x => x !== h);
@@ -1165,7 +1316,13 @@ export class GameEngine {
     if (this.interactingHunter) return; // Paused for dialog
     this.ticks++;
     this.player.update(this.input, this);
-    if (this.player.hp <= 0) { this.onStateChange('GAMEOVER'); return; }
+    if (this.player.hp <= 0) { 
+      if (!this.stopped) {
+        this.onStateChange('GAMEOVER'); 
+        this.stop();
+      }
+      return; 
+    }
 
     for (const h of this.hunters) {
       if (Math.hypot(this.player.x - h.x, this.player.y - h.y) < this.player.r + h.r + 20) {
@@ -1188,7 +1345,7 @@ export class GameEngine {
       const m = this.monsters[i];
       m.update(this);
       if (m.hp <= 0) {
-        this.player.gainXp(m.xp); this.player.gold += m.gold;
+        this.player.gainXp(m.xp, this); this.player.gold += m.gold;
         this.corpses.push(new Corpse(m.x, m.y, m.level, m.maxHp, m.atk, m.def));
         if (Math.random() < 0.2) this.player.inventory.push(this.generateItem(this.floor));
         this.monsters.splice(i, 1);
@@ -1227,20 +1384,26 @@ export class GameEngine {
 
     if (this.monsters.length === 0) {
       this.floor++; this.player.pts += 5;
-      this.onStateChange('LEVELUP');
-      this.generateFloor();
-      this.onPlayerUpdate(this.player);
+      this.onStateChange('TRANSITION');
       return;
     }
 
     this.camera.x = this.player.x - this.canvas.width / 2;
     this.camera.y = this.player.y - this.canvas.height / 2;
+    if (this.screenShake > 0) this.screenShake--;
     if (this.ticks % 10 === 0) this.onPlayerUpdate(this.player);
   }
 
   draw() {
     this.ctx.fillStyle = '#0f172a';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+    this.ctx.save();
+    if (this.screenShake > 0) {
+      const dx = (Math.random() - 0.5) * this.screenShake;
+      const dy = (Math.random() - 0.5) * this.screenShake;
+      this.ctx.translate(dx, dy);
+    }
 
     const startX = Math.max(0, Math.floor(this.camera.x / this.tileSize));
     const startY = Math.max(0, Math.floor(this.camera.y / this.tileSize));
@@ -1272,11 +1435,30 @@ export class GameEngine {
     for (const p of this.projectiles) p.draw(this.ctx, this.camera.x, this.camera.y);
     for (const p of this.particles) p.draw(this.ctx, this.camera.x, this.camera.y);
     for (const f of this.floatingTexts) f.draw(this.ctx, this.camera.x, this.camera.y);
+    
+    this.ctx.restore();
+
+    // Vignette
+    const gradient = this.ctx.createRadialGradient(
+      this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.3,
+      this.canvas.width / 2, this.canvas.height / 2, this.canvas.height * 0.8
+    );
+    let tint = 'rgba(0,0,0,0.7)';
+    if (this.theme === 'volcano') tint = 'rgba(50,0,0,0.7)';
+    else if (this.theme === 'snow') tint = 'rgba(0,10,30,0.7)';
+    else if (this.theme === 'forest') tint = 'rgba(0,20,0,0.7)';
+    else if (this.theme === 'temple') tint = 'rgba(30,20,0,0.7)';
+    
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, tint);
+    this.ctx.fillStyle = gradient;
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   loop = () => {
     if (this.stopped) return;
-    this.update(); this.draw();
+    if (!this.paused) this.update();
+    this.draw();
     requestAnimationFrame(this.loop);
   }
 }
