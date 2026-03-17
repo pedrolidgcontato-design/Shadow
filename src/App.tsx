@@ -37,6 +37,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState]);
 
+  useEffect(() => {
+    if (engine) {
+      engine.paused = gameState === 'INV' || gameState === 'LEVELUP';
+    }
+  }, [gameState, engine]);
+
   const startGame = (classType: ClassType) => {
     if (engine) engine.stop();
     if (canvasRef.current) {
@@ -127,13 +133,84 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (gameState === 'TRANSITION') {
+      const timer = setTimeout(() => {
+        if (engine) {
+          engine.generateFloor();
+          engine.onPlayerUpdate(engine.player);
+          setGameState('LEVELUP');
+        }
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState, engine]);
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans selection:bg-purple-500/30">
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full block"
-        style={{ display: gameState === 'MENU' || gameState === 'CLASS' ? 'none' : 'block', imageRendering: 'pixelated' }}
+        style={{ display: gameState === 'MENU' || gameState === 'CLASS' || gameState === 'TRANSITION' ? 'none' : 'block', imageRendering: 'pixelated' }}
       />
+
+      {/* TRANSITION */}
+      {gameState === 'TRANSITION' && (
+        <div className="absolute inset-0 bg-black flex flex-col items-center justify-center z-50">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="text-center"
+          >
+            <h1 className="text-6xl md:text-8xl font-light text-white mb-6 tracking-[0.2em] uppercase" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>
+              FLOOR CLEARED
+            </h1>
+            <p className="text-xl text-white/50 font-mono tracking-widest uppercase mb-12">
+              Ascending to Floor {engine?.floor}
+            </p>
+            
+            <div className="relative w-32 h-32 mx-auto">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 border-2 border-dashed border-white/20 rounded-full"
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center relative overflow-hidden">
+                  {engine && (
+                    <motion.img 
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ delay: 0.5, duration: 0.5 }}
+                      src={getSpriteDataURL(engine.player.classType, 16)} 
+                      alt="Player" 
+                      className="w-16 h-16 object-contain"
+                      style={{ imageRendering: 'pixelated' }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.5, duration: 1 }}
+              className="mt-16"
+            >
+              <div className="w-64 h-1 bg-white/10 rounded-full mx-auto overflow-hidden relative">
+                <motion.div 
+                  initial={{ x: '-100%' }}
+                  animate={{ x: '100%' }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 bg-white/50 w-1/2 rounded-full"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        </div>
+      )}
 
       {/* HUD */}
       {gameState === 'PLAY' && playerData && engine && (
@@ -148,23 +225,35 @@ export default function App() {
               <div className="space-y-3">
                 <div>
                   <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest mb-1.5"><span className="text-red-400">HP</span><span className="text-white/70">{Math.floor(playerData.hp)}/{playerData.hpTotal}</span></div>
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-red-500 transition-all duration-200" style={{width: `${(playerData.hp/playerData.hpTotal)*100}%`}}></div></div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-red-500 transition-all duration-200 shadow-[0_0_10px_rgba(239,68,68,0.8)]" style={{width: `${(playerData.hp/playerData.hpTotal)*100}%`}}></div></div>
                 </div>
                 <div>
                   <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest mb-1.5"><span className="text-blue-400">MP</span><span className="text-white/70">{Math.floor(playerData.mp)}/{playerData.mpTotal}</span></div>
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-200" style={{width: `${(playerData.mp/playerData.mpTotal)*100}%`}}></div></div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-blue-500 transition-all duration-200 shadow-[0_0_10px_rgba(59,130,246,0.8)]" style={{width: `${(playerData.mp/playerData.mpTotal)*100}%`}}></div></div>
                 </div>
                 <div>
                   <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest mb-1.5"><span className="text-yellow-400">XP</span><span className="text-white/70">{Math.floor(playerData.xp)}/{playerData.xpNext}</span></div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-yellow-500 transition-all duration-200" style={{width: `${(playerData.xp/playerData.xpNext)*100}%`}}></div></div>
+                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-yellow-500 transition-all duration-200 shadow-[0_0_10px_rgba(234,179,8,0.8)]" style={{width: `${(playerData.xp/playerData.xpNext)*100}%`}}></div></div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest mb-1.5"><span className="text-green-400">STAMINA</span></div>
+                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="h-full bg-green-500 transition-all duration-200 shadow-[0_0_10px_rgba(34,197,94,0.8)]" style={{width: `${(playerData.stamina/playerData.maxStamina)*100}%`}}></div></div>
                 </div>
               </div>
 
-              <div className="mt-6 grid grid-cols-2 gap-3 text-xs text-white/50 font-mono">
-                <div className="flex items-center gap-2"><Sword size={14} className="text-white/30"/> {playerData.atkTotal}</div>
-                <div className="flex items-center gap-2"><Shield size={14} className="text-white/30"/> {playerData.defTotal}</div>
-                <div className="flex items-center gap-2"><Star size={14} className="text-white/30"/> {playerData.gold}g</div>
-                <div className="flex items-center gap-2 text-purple-400/80">Shadows: {playerData.shadows.length}/{playerData.maxShadows}</div>
+              <div className="mt-6 grid grid-cols-2 gap-3 text-xs text-white/80 font-mono uppercase tracking-widest">
+                <div className="flex items-center gap-2"><Sword size={14} className="text-red-400"/> ATK: {playerData.atkTotal}</div>
+                <div className="flex items-center gap-2"><Shield size={14} className="text-blue-400"/> DEF: {playerData.defTotal}</div>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <div className="flex justify-between text-[10px] font-mono uppercase tracking-widest mb-1.5">
+                  <span className="text-purple-400">CLASS SKILL</span>
+                  <span className="text-white/70">{playerData.skillCd > 0 ? (playerData.skillCd / 60).toFixed(1) + 's' : 'READY'}</span>
+                </div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full bg-purple-500 transition-all duration-200 shadow-[0_0_10px_rgba(168,85,247,0.8)]" style={{width: `${playerData.skillCd > 0 ? (playerData.skillCd / 150) * 100 : 100}%`}}></div>
+                </div>
               </div>
               
               {playerData.pts > 0 && (
@@ -174,9 +263,9 @@ export default function App() {
               )}
             </div>
 
-            <div className="bg-[#0a0a0a]/80 backdrop-blur-md border border-white/10 px-8 py-4 rounded-2xl shadow-2xl text-center">
+            <div className="bg-[#0a0a0a]/80 backdrop-blur-md border border-white/10 px-8 py-4 rounded-2xl shadow-[0_0_30px_rgba(0,0,0,0.5)] text-center">
               <div className="text-white/40 text-[10px] font-mono uppercase tracking-[0.3em] mb-2">Floor</div>
-              <div className="text-4xl font-light text-white" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{engine.floor} <span className="text-white/20 text-2xl">/ 100</span></div>
+              <div className="text-4xl font-light text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{engine.floor} <span className="text-white/20 text-2xl">/ 100</span></div>
             </div>
           </div>
 
@@ -187,26 +276,26 @@ export default function App() {
                 const cd = playerData.hotbarCd[i];
                 const maxCd = skillId === 'slash' ? 40 : skillId === 'fireball' ? 60 : skillId === 'shadow_bolt' ? 30 : skillId === 'multishot' ? 45 : skillId === 'lightning' ? 80 : skillId === 'heal' ? 120 : skillId === 'dash' ? 30 : skillId === 'meteor' ? 100 : skillId === 'poison_nova' ? 60 : 1;
                 return (
-                  <div key={i} className="relative w-12 h-12 bg-[#0a0a0a]/80 backdrop-blur-md border border-white/10 rounded-xl flex items-center justify-center shadow-2xl">
-                    <span className="absolute -top-2 -left-2 bg-slate-800 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-white/20 font-mono">{i + 1}</span>
+                  <div key={i} className="relative w-14 h-14 bg-[#0a0a0a]/80 backdrop-blur-md border border-white/10 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                    <span className="absolute -top-2 -left-2 bg-slate-800 text-white text-[10px] w-6 h-6 flex items-center justify-center rounded-full border border-white/20 font-mono z-10">{i + 1}</span>
                     {skillId ? (
                       <>
-                        <div className="text-white/80 text-xs font-mono uppercase tracking-tighter text-center leading-tight">
+                        <div className="text-white/90 text-[10px] font-bold font-mono uppercase tracking-tighter text-center leading-tight drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">
                           {skillId.substring(0, 4)}
                         </div>
                         {cd > 0 && (
-                          <div className="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
-                            <span className="text-white font-mono text-xs">{(cd / 60).toFixed(1)}</span>
+                          <div className="absolute inset-0 bg-black/70 rounded-xl flex items-center justify-center backdrop-blur-[2px]">
+                            <span className="text-white font-mono text-xs drop-shadow-[0_0_5px_rgba(255,255,255,0.8)]">{(cd / 60).toFixed(1)}s</span>
                           </div>
                         )}
                         {cd > 0 && (
                           <div className="absolute bottom-0 left-0 h-1 bg-white/20 w-full rounded-b-xl overflow-hidden">
-                            <div className="h-full bg-white/60" style={{ width: `${(cd / maxCd) * 100}%` }} />
+                            <div className="h-full bg-white/80 shadow-[0_0_5px_rgba(255,255,255,0.8)]" style={{ width: `${(cd / maxCd) * 100}%` }} />
                           </div>
                         )}
                       </>
                     ) : (
-                      <span className="text-white/20 text-xs font-mono">Empty</span>
+                      <span className="text-white/20 text-[10px] font-mono uppercase">Empty</span>
                     )}
                   </div>
                 );
@@ -480,17 +569,26 @@ export default function App() {
       )}
 
       {gameState === 'GAMEOVER' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-md">
-          <div className="text-center">
-            <h2 className="text-6xl md:text-8xl font-light text-red-500 mb-6 tracking-[0.2em] uppercase" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>YOU DIED</h2>
-            <p className="text-lg text-white/50 mb-12 font-mono uppercase tracking-widest">Floor Reached: {engine?.floor}</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/95 backdrop-blur-xl z-50">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(239,68,68,0.15)_0%,_transparent_60%)]" />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center relative z-10"
+          >
+            <h2 className="text-7xl md:text-9xl font-black text-red-600 mb-6 tracking-[0.3em] uppercase drop-shadow-[0_0_30px_rgba(239,68,68,0.8)]" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>YOU DIED</h2>
+            <div className="w-24 h-[1px] bg-red-500/50 mx-auto mb-8" />
+            <p className="text-xl text-white/70 mb-12 font-mono uppercase tracking-[0.3em]">Floor Reached: <span className="text-red-400 font-bold">{engine?.floor}</span></p>
             <button 
-              onClick={() => setGameState('MENU')}
-              className="px-10 py-4 bg-transparent border border-red-500/30 hover:bg-red-500/10 text-red-400 rounded-full text-sm tracking-[0.2em] uppercase transition-colors"
+              onClick={() => {
+                if (engine) engine.stop();
+                setGameState('MENU');
+              }}
+              className="px-12 py-5 bg-transparent border border-red-500/50 hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_20px_rgba(239,68,68,0.4)] text-red-400 rounded-full text-sm tracking-[0.3em] uppercase transition-all duration-300"
             >
               Return to Menu
             </button>
-          </div>
+          </motion.div>
         </div>
       )}
 
@@ -500,7 +598,10 @@ export default function App() {
             <h2 className="text-6xl md:text-8xl font-light text-yellow-500 mb-6 tracking-[0.2em] uppercase" style={{ fontFamily: "'Space Grotesk', sans-serif" }}>VICTORY</h2>
             <p className="text-lg text-white/60 mb-12 font-light max-w-md mx-auto leading-relaxed">You conquered the 100th floor and became the Shadow Monarch.</p>
             <button 
-              onClick={() => setGameState('MENU')}
+              onClick={() => {
+                if (engine) engine.stop();
+                setGameState('MENU');
+              }}
               className="px-10 py-4 bg-white text-black hover:bg-white/90 rounded-full text-sm tracking-[0.2em] uppercase transition-colors font-bold"
             >
               Play Again
